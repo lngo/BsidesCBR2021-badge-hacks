@@ -170,36 +170,7 @@ static void iot_epaper_gpio_init(epaper_conf_t * pin)
     gpio_set_pull_mode(pin->busy_pin, GPIO_PULLUP_ONLY);
 }
 
-static esp_err_t iot_epaper_spi_init(epaper_handle_t dev, spi_device_handle_t *e_spi, epaper_conf_t *pin)
-{
-    esp_err_t ret;
-    spi_bus_config_t buscfg = {
-        .miso_io_num = -1,  // MISO not used, we are transferring to the slave only
-        .mosi_io_num = pin->mosi_pin,
-        .sclk_io_num = pin->sck_pin,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        // The maximum size sent below covers the case
-        // when the whole frame buffer is transferred to the slave
-        .max_transfer_sz = EPD_WIDTH * EPD_HEIGHT / 8,
-    };
-    spi_device_interface_config_t devcfg = {
-        .clock_speed_hz = pin->clk_freq_hz,
-        .mode = 0,  // SPI mode 0
-        .spics_io_num = pin->cs_pin,
-        // To Do: clarify what does it mean
-        .queue_size = EPAPER_QUE_SIZE_DEFAULT,
-        // We are sending only in one direction (to the ePaper slave)
-        .flags = (SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_3WIRE),
-        //Specify pre-transfer callback to handle D/C line
-        .pre_cb = iot_epaper_pre_transfer_callback,
-    };
-    ret = spi_bus_initialize(pin->spi_host, &buscfg, 2);
-    assert(ret == ESP_OK);
-    ret = spi_bus_add_device(pin->spi_host, &devcfg, e_spi);
-    assert(ret == ESP_OK);
-    return ret;
-}
+
 
 static void iot_epaper_set_lut(epaper_handle_t dev)
 {
@@ -210,111 +181,9 @@ static void iot_epaper_set_lut(epaper_handle_t dev)
     xSemaphoreGiveRecursive(device->spi_mux);
 }
 
-static void iot_epaper_epd_init(epaper_handle_t dev)
-{
-    epaper_dev_t* device = (epaper_dev_t*) dev;
-    xSemaphoreTakeRecursive(device->spi_mux, portMAX_DELAY);
-
-    if (device->pin.fast_bw_mode) {
-        iot_epaper_reset(dev);                  // hardware reset
-        iot_epaper_wait_idle(dev);
-
-        /* This part of code is ePaper module specific
-        * It has been copied from the instructions as it is
-        */
-        iot_epaper_send_command(dev, E_PAPER_SW_RESET); // Software reset
-        iot_epaper_wait_idle(dev);
-
-        iot_epaper_send_command(dev, 0x74);     // Set analog block control
-        iot_epaper_send_byte(dev, 0x54);
-
-        iot_epaper_send_command(dev, 0x7E);     // Set digital block control
-        iot_epaper_send_byte(dev, 0x3B);
-        
-
-        iot_epaper_send_command(dev, 0x11);     // RAM data entry mode
-        iot_epaper_send_byte(dev, 0x03);        // Address counter is updated in Y direction, Y increment, X increment
 
 
-        iot_epaper_send_command(dev, 0x3C);     // Set border waveform for VBD 
-        iot_epaper_send_byte(dev, 0x01);
 
-
-        iot_epaper_send_command(dev, 0x2C);     // Set VCOM value
-        iot_epaper_send_byte(dev, 0x26);
-
-        iot_epaper_send_command(dev, 0x03);     // Gate voltage setting (17h = 20 Volt, ranges from 10v to 21v)
-        iot_epaper_send_byte(dev, 0x17);
-
-        iot_epaper_send_command(dev, 0x04);     // Source voltage setting (15volt, 0 volt and -15 volt)
-        iot_epaper_send_byte(dev, 0x41);
-        iot_epaper_send_byte(dev, 0x00);
-        iot_epaper_send_byte(dev, 0x32);
-
-        iot_epaper_set_lut(dev);
-    } else {
-
-        iot_epaper_reset(dev);                  // hardware reset
-        iot_epaper_wait_idle(dev);
-
-        /* This part of code is ePaper module specific
-        * It has been copied from the instructions as it is
-        */
-        iot_epaper_send_command(dev, E_PAPER_SW_RESET); // Software reset
-        iot_epaper_wait_idle(dev);
-
-        iot_epaper_send_command(dev, 0x74);     // Set analog block control
-        iot_epaper_send_byte(dev, 0x54);
-
-        iot_epaper_send_command(dev, 0x7E);     // Set digital block control
-        iot_epaper_send_byte(dev, 0x3B);
-        
-
-        iot_epaper_send_command(dev, 0x11);     // RAM data entry mode
-        iot_epaper_send_byte(dev, 0x03);        // Address counter is updated in Y direction, Y increment, X increment
-
-
-        iot_epaper_send_command(dev, 0x3C);     // Set border waveform for VBD 
-        iot_epaper_send_byte(dev, 0x01);
-        
-        iot_epaper_send_command(dev, 0x18);     //Temperature sensor selection
-        iot_epaper_send_byte(dev, 0x80);
-        
-        
-        iot_epaper_send_command(dev, 0x22);     //Enable the stage for master activation
-        iot_epaper_send_byte(dev, 0xB1);
-        
-        iot_epaper_send_command(dev, 0x20);		//Master activation
-
-    }
-
-    xSemaphoreGiveRecursive(device->spi_mux);
-}
-
-epaper_handle_t iot_epaper_create(spi_device_handle_t bus, epaper_conf_t *epconf)
-{
-    epaper_dev_t* dev = (epaper_dev_t*) calloc(1, sizeof(epaper_dev_t));
-    dev->spi_mux = xSemaphoreCreateRecursiveMutex();
-    
-	uint8_t* bw_frame_buf = (unsigned char*) heap_caps_malloc(
-            (epconf->width * epconf->height / 8), MALLOC_CAP_8BIT);
-	
-	uint8_t* r_frame_buf = (unsigned char*) heap_caps_malloc(
-            (epconf->width * epconf->height / 8), MALLOC_CAP_8BIT);
-	
-    iot_epaper_gpio_init(epconf);
-    ESP_LOGD(TAG, "gpio init ok");
-    if (bus) {
-        dev->bus = bus;
-    } else {
-        iot_epaper_spi_init(dev, &dev->bus, epconf);
-        ESP_LOGD(TAG, "spi init ok");
-    }
-    dev->pin = *epconf;
-    iot_epaper_epd_init(dev);
-    iot_epaper_paint_init(dev, bw_frame_buf, r_frame_buf, epconf->width, epconf->height);
-    return (epaper_handle_t) dev;
-}
 
 esp_err_t iot_epaper_delete(epaper_handle_t dev, bool del_bus)
 {
@@ -733,47 +602,36 @@ void iot_epaper_display_frame(epaper_handle_t dev)
     xSemaphoreTakeRecursive(device->spi_mux, portMAX_DELAY);
 
 	// configure ePaper's memory to send data
-	iot_set_ram_area(dev, 0, 0, EPD_WIDTH-1, EPD_HEIGHT-1);
+	
 	iot_set_ram_address_counter(dev, 0, 0);
 
-	iot_epaper_send_command(dev, 0x24);
-	iot_epaper_send_data(dev, device->paint.bw_image, device->paint.width * device->paint.height / 8);
-	
     if (device->pin.fast_bw_mode) {
+        //Updating B&W colors
+        iot_epaper_send_command(dev, 0x24);
+	    iot_epaper_send_data(dev, device->paint.bw_image, device->paint.width * device->paint.height / 8);
 
-        iot_epaper_send_command(dev, 0x3A);     // write number of overscan lines
-        iot_epaper_send_byte(dev, 26);          // 26 dummy lines per gate
-        iot_epaper_send_command(dev, 0x3B);     // write time to write every line
-        iot_epaper_send_byte(dev, 0x08);        // 62us per line
-
-        // configure length of update
-        iot_epaper_send_command(dev, E_PAPER_DRIVER_OUTPUT_CONTROL);
-        iot_epaper_send_byte(dev, 0x27);        // y_len & 0xff
-        iot_epaper_send_byte(dev, 0x01);        // y_len >> 8
-        iot_epaper_send_byte(dev, 0x00);
-
-        iot_epaper_send_command(dev, 0x0f);     // configure starting-line of update
-        iot_epaper_send_byte(dev, 0x00);        // y_start & 0xff
-        iot_epaper_send_byte(dev, 0x00);    
-        
         iot_epaper_send_command(dev, 0x22);   
         iot_epaper_send_byte(dev, 0xC7);
 
-        // start update
+        // Refresh display
         iot_epaper_send_command(dev, 0x20);
     } 
     else {
+        //Updating B&W colors
+        iot_epaper_send_command(dev, 0x24);
+	    iot_epaper_send_data(dev, device->paint.bw_image, device->paint.width * device->paint.height / 8);
+
+        iot_epaper_send_command(dev, 0x22);   
+        iot_epaper_send_byte(dev, 0xC7);
         
+        //Updating Red color
         iot_epaper_send_command(dev, 0x26);
         iot_epaper_send_data(dev, device->paint.r_image, device->paint.width * device->paint.height / 8);	
 
         iot_epaper_send_command(dev, 0x21);
         iot_epaper_send_byte(dev, 0x00);
         
-        iot_epaper_send_command(dev, 0x22);   
-        iot_epaper_send_byte(dev, 0xC7);
-
-        // start update
+        // Refresh display
         iot_epaper_send_command(dev, 0x20);
     }
 
@@ -789,4 +647,160 @@ void iot_epaper_sleep(epaper_handle_t dev)
     iot_epaper_send_command(dev, E_PAPER_DEEP_SLEEP_MODE);
     iot_epaper_wait_idle(dev);
     xSemaphoreGiveRecursive(device->spi_mux);
+}
+
+static void iot_epaper_epd_init(epaper_handle_t dev)
+{
+    epaper_dev_t* device = (epaper_dev_t*) dev;
+    xSemaphoreTakeRecursive(device->spi_mux, portMAX_DELAY);
+
+    if (device->pin.fast_bw_mode) {
+        iot_epaper_reset(dev);                  // hardware reset
+        iot_epaper_wait_idle(dev);
+
+        /* This part of code is ePaper module specific
+        * It has been copied from the instructions as it is
+        */
+        iot_epaper_send_command(dev, E_PAPER_SW_RESET); // Software reset
+        iot_epaper_wait_idle(dev);
+
+        iot_epaper_send_command(dev, 0x74);     // Set analog block control
+        iot_epaper_send_byte(dev, 0x54);
+
+        iot_epaper_send_command(dev, 0x7E);     // Set digital block control
+        iot_epaper_send_byte(dev, 0x3B);
+        
+
+        iot_epaper_send_command(dev, 0x11);     // RAM data entry mode
+        iot_epaper_send_byte(dev, 0x03);        // Address counter is updated in Y direction, Y increment, X increment
+
+
+        iot_epaper_send_command(dev, 0x3C);     // Set border waveform for VBD 
+        iot_epaper_send_byte(dev, 0x01);
+
+
+        iot_epaper_send_command(dev, 0x2C);     // Set VCOM value
+        iot_epaper_send_byte(dev, 0x26);
+
+        iot_epaper_send_command(dev, 0x03);     // Gate voltage setting (17h = 20 Volt, ranges from 10v to 21v)
+        iot_epaper_send_byte(dev, 0x17);
+
+        iot_epaper_send_command(dev, 0x04);     // Source voltage setting (15volt, 0 volt and -15 volt)
+        iot_epaper_send_byte(dev, 0x41);
+        iot_epaper_send_byte(dev, 0x00);
+        iot_epaper_send_byte(dev, 0x32);
+
+        iot_epaper_set_lut(dev);
+
+        iot_epaper_send_command(dev, 0x3A);     // write number of overscan lines
+        iot_epaper_send_byte(dev, 26);          // 26 dummy lines per gate
+        iot_epaper_send_command(dev, 0x3B);     // write time to write every line
+        iot_epaper_send_byte(dev, 0x08);        // 62us per line
+
+        // configure length of update
+        iot_epaper_send_command(dev, E_PAPER_DRIVER_OUTPUT_CONTROL);
+        iot_epaper_send_byte(dev, 0x27);        // y_len & 0xff
+        iot_epaper_send_byte(dev, 0x01);        // y_len >> 8
+        iot_epaper_send_byte(dev, 0x00);
+
+        iot_epaper_send_command(dev, 0x0f);     // configure starting-line of update
+        iot_epaper_send_byte(dev, 0x00);        // y_start & 0xff
+        iot_epaper_send_byte(dev, 0x00); 
+
+        iot_set_ram_area(dev, 0, 0, EPD_WIDTH-1, EPD_HEIGHT-1);
+    } else {
+
+        iot_epaper_reset(dev);                  // hardware reset
+        iot_epaper_wait_idle(dev);
+
+        /* This part of code is ePaper module specific
+        * It has been copied from the instructions as it is
+        */
+        iot_epaper_send_command(dev, E_PAPER_SW_RESET); // Software reset
+        iot_epaper_wait_idle(dev);
+
+        iot_epaper_send_command(dev, 0x74);     // Set analog block control
+        iot_epaper_send_byte(dev, 0x54);
+
+        iot_epaper_send_command(dev, 0x7E);     // Set digital block control
+        iot_epaper_send_byte(dev, 0x3B);
+        
+
+        iot_epaper_send_command(dev, 0x11);     // RAM data entry mode
+        iot_epaper_send_byte(dev, 0x03);        // Address counter is updated in Y direction, Y increment, X increment
+
+
+        iot_epaper_send_command(dev, 0x3C);     // Set border waveform for VBD 
+        iot_epaper_send_byte(dev, 0x01);
+        
+        iot_epaper_send_command(dev, 0x18);     //Temperature sensor selection
+        iot_epaper_send_byte(dev, 0x80);
+        
+        
+        iot_epaper_send_command(dev, 0x22);     //Enable the stage for master activation
+        iot_epaper_send_byte(dev, 0xB1);
+
+        iot_set_ram_area(dev, 0, 0, EPD_WIDTH-1, EPD_HEIGHT-1);
+        
+        iot_epaper_send_command(dev, 0x20);		//Master activation
+
+    }
+
+    xSemaphoreGiveRecursive(device->spi_mux);
+}
+
+static esp_err_t iot_epaper_spi_init(epaper_handle_t dev, spi_device_handle_t *e_spi, epaper_conf_t *pin)
+{
+    esp_err_t ret;
+    spi_bus_config_t buscfg = {
+        .miso_io_num = -1,  // MISO not used, we are transferring to the slave only
+        .mosi_io_num = pin->mosi_pin,
+        .sclk_io_num = pin->sck_pin,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        // The maximum size sent below covers the case
+        // when the whole frame buffer is transferred to the slave
+        .max_transfer_sz = EPD_WIDTH * EPD_HEIGHT / 8,
+    };
+    spi_device_interface_config_t devcfg = {
+        .clock_speed_hz = pin->clk_freq_hz,
+        .mode = 0,  // SPI mode 0
+        .spics_io_num = pin->cs_pin,
+        // To Do: clarify what does it mean
+        .queue_size = EPAPER_QUE_SIZE_DEFAULT,
+        // We are sending only in one direction (to the ePaper slave)
+        .flags = (SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_3WIRE),
+        //Specify pre-transfer callback to handle D/C line
+        .pre_cb = iot_epaper_pre_transfer_callback,
+    };
+    ret = spi_bus_initialize(pin->spi_host, &buscfg, 2);
+    assert(ret == ESP_OK);
+    ret = spi_bus_add_device(pin->spi_host, &devcfg, e_spi);
+    assert(ret == ESP_OK);
+    return ret;
+}
+
+epaper_handle_t iot_epaper_create(spi_device_handle_t bus, epaper_conf_t *epconf)
+{
+    epaper_dev_t* dev = (epaper_dev_t*) calloc(1, sizeof(epaper_dev_t));
+    dev->spi_mux = xSemaphoreCreateRecursiveMutex();
+    
+	uint8_t* bw_frame_buf = (unsigned char*) heap_caps_malloc(
+            (epconf->width * epconf->height / 8), MALLOC_CAP_8BIT);
+	
+	uint8_t* r_frame_buf = (unsigned char*) heap_caps_malloc(
+            (epconf->width * epconf->height / 8), MALLOC_CAP_8BIT);
+	
+    iot_epaper_gpio_init(epconf);
+    ESP_LOGD(TAG, "gpio init ok");
+    if (bus) {
+        dev->bus = bus;
+    } else {
+        iot_epaper_spi_init(dev, &dev->bus, epconf);
+        ESP_LOGD(TAG, "spi init ok");
+    }
+    dev->pin = *epconf;
+    iot_epaper_epd_init(dev);
+    iot_epaper_paint_init(dev, bw_frame_buf, r_frame_buf, epconf->width, epconf->height);
+    return (epaper_handle_t) dev;
 }

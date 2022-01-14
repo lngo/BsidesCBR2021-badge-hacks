@@ -25,7 +25,6 @@ static const char *TAG = "ePaper Example";
 #define CS_PIN      27
 
 // Color inverse. 1 or 0 = set or reset a bit if set a colored pixel
-#define IF_INVERT_COLOR 1
 
 void e_paper_task(void *pvParameter)
 {
@@ -52,7 +51,7 @@ void e_paper_task(void *pvParameter)
         .width = EPD_WIDTH,
         .height = EPD_HEIGHT,
         .color_inv = 1,
-        .fast_bw_mode = true,
+        .fast_bw_mode = false,
     };
 
    
