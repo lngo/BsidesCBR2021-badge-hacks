@@ -1,6 +1,5 @@
 To be updated..
 
-built with IDF 4.2.2
 
 ## License
 

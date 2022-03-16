@@ -23,6 +23,7 @@ extern "C"
 #include <stdint.h>
 #include "epaper-29-dke.h"
 
+extern epaper_font_t epaper_font_60;
 extern epaper_font_t epaper_font_24;
 extern epaper_font_t epaper_font_20;
 extern epaper_font_t epaper_font_16;
