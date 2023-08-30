@@ -5,7 +5,7 @@
    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
    CONDITIONS OF ANY KIND, either express or implied.
 */
-//Modifications copyright (C) 2022 longngo.xyz
+//Modifications copyright (C) 2022 longngo.net
 
 #include <stdio.h>
 #include <string.h>
